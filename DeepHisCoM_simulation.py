@@ -217,6 +217,11 @@ def train_model(train_loader: DataLoader, test_loader: DataLoader, lr: float, ar
         elif args.stop_type == 5:
             if epoch > args.count_lim:
                 break
+
+    # if no early stopping criterion selected, capture the final parameters
+    if best_param is None:
+        best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
+
     return best_param, best_score
 
 
@@ -314,6 +319,8 @@ def main() -> None:
         best_bs = args.batch_size
         best_val = float("-inf")
         best_param = None
+        # best validation during grid search
+        best_val_search = float("-inf")
         for permutation in range(args.perm):
             print(f"Simulation {sim_num}, permutation {permutation}")
             torch.manual_seed(permutation)
@@ -368,23 +375,22 @@ def main() -> None:
                             cov_num,
                             act_fn,
                         )
-                        if score > best_val:
-                            best_val = score
+                        if score > best_val_search:
+                            best_val_search = score
                             best_lr = lr_c
                             best_bs = bs_c
-                            best_param = param
+
                 args.learning_rate = best_lr
                 args.batch_size = best_bs
-                out_dir = os.path.join(args.experiment_name, str(sim_num), experiment, str(permutation))
-                os.makedirs(out_dir, exist_ok=True)
-                if best_param is not None:
-                    np.savetxt(os.path.join(out_dir, "param.txt"), best_param)
-            else:
-                train_loader, test_loader = build_loader(args.batch_size)
-                param, _ = train_model(
+                # retrain using the best hyperparameters with early stopping
+                torch.manual_seed(permutation)
+                random.seed(permutation)
+                np.random.seed(permutation)
+                train_loader, test_loader = build_loader(best_bs)
+                best_param, best_val = train_model(
                     train_loader,
                     test_loader,
-                    args.learning_rate,
+                    best_lr,
                     args,
                     device,
                     nvar,
@@ -393,10 +399,26 @@ def main() -> None:
                     cov_num,
                     act_fn,
                 )
-                if param is not None:
-                    out_dir = os.path.join(args.experiment_name, str(sim_num), experiment, str(permutation))
-                    os.makedirs(out_dir, exist_ok=True)
-                    np.savetxt(os.path.join(out_dir, "param.txt"), param)
+                out_dir = os.path.join(args.experiment_name, str(sim_num), experiment, str(permutation))
+                os.makedirs(out_dir, exist_ok=True)
+                np.savetxt(os.path.join(out_dir, "param.txt"), best_param)
+            else:
+                train_loader, test_loader = build_loader(best_bs)
+                param, _ = train_model(
+                    train_loader,
+                    test_loader,
+                    best_lr,
+                    args,
+                    device,
+                    nvar,
+                    node_num,
+                    layer_num,
+                    cov_num,
+                    act_fn,
+                )
+                out_dir = os.path.join(args.experiment_name, str(sim_num), experiment, str(permutation))
+                os.makedirs(out_dir, exist_ok=True)
+                np.savetxt(os.path.join(out_dir, "param.txt"), param)
 
         print(
             f"Best validation score for original data (lr={best_lr}, batch_size={best_bs}): {best_val}"
