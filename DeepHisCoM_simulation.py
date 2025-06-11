@@ -1,6 +1,7 @@
 import os
 import random
 import argparse
+from glob import glob
 from collections import OrderedDict
 
 import numpy as np
@@ -117,7 +118,9 @@ class DeepHisCoM(nn.Module):
 def parse_args():
     parser = argparse.ArgumentParser("DeepHisCoM permutation simulation")
     parser.add_argument("--dir", type=str, default=".", help="working directory")
-    parser.add_argument("--scenario", type=str, required=True, help="simulation csv file")
+    parser.add_argument("--simulation_dir", type=str, default="simulation", help="directory containing simulation folders")
+    parser.add_argument("--start_sim", type=int, default=1, help="start simulation number")
+    parser.add_argument("--end_sim", type=int, help="end simulation number (inclusive)")
     parser.add_argument("--seed", type=int, default=100)
     parser.add_argument("--perm", type=int, default=1000)
     parser.add_argument("--gpu", type=int, default=0)
@@ -201,111 +204,130 @@ def main() -> None:
         cov_df = pd.read_csv("cov.csv")
         cov_num = len(cov_df["x"])
 
-    for permutation in range(args.perm):
-        torch.manual_seed(permutation)
-        random.seed(permutation)
-        np.random.seed(permutation)
-        train = train_base.copy()
-        if permutation != 0:
-            train["phenotype"] = np.random.permutation(train["phenotype"])
-        ph = train["phenotype"]
-        train = (train - train.mean()) / train.std()
-        train["phenotype"] = ph
+    eps = 1e-6
+    X_log = np.log(metabolite.values + eps)
+    X_scaled = StandardScaler().fit_transform(X_log)
+    metabolite_scaled = pd.DataFrame(X_scaled, columns=metabolite.columns)
 
-        tensor = torch.from_numpy(train.values).float()
-        dataset = CustomDataset(tensor)
+    start_sim = args.start_sim
+    end_sim = args.end_sim if args.end_sim is not None else start_sim
 
-        if 3 <= args.stop_type <= 4:
-            t_idx, v_idx, _, _ = train_test_split(
-                range(len(dataset)), dataset.y_data, stratify=dataset.y_data, test_size=args.divide_rate
-            )
-            train_split = Subset(dataset, t_idx)
-            test_split = Subset(dataset, v_idx)
-            if args.batch_size == 0:
-                train_loader = DataLoader(train_split, batch_size=len(train_split), shuffle=True)
-                test_loader = DataLoader(test_split, batch_size=len(test_split))
-            else:
-                train_loader = DataLoader(train_split, batch_size=args.batch_size, shuffle=True)
-                test_loader = DataLoader(test_split, batch_size=args.batch_size)
-        else:
-            if args.batch_size == 0:
-                train_loader = DataLoader(dataset, batch_size=len(dataset), shuffle=True)
-            else:
-                train_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-            test_loader = None
+    for sim_num in range(start_sim, end_sim + 1):
+        sim_dir = os.path.join(args.simulation_dir, str(sim_num))
+        for scenario_path in sorted(glob(os.path.join(sim_dir, "*.csv"))):
+            experiment = os.path.splitext(os.path.basename(scenario_path))[0]
+            sim_df = pd.read_csv(scenario_path)
+            out_col = [c for c in sim_df.columns if c.startswith("y_")][0]
+            sim_df = sim_df[[out_col]].rename(columns={out_col: "phenotype"})
+            train_base = pd.concat([metabolite_scaled.reset_index(drop=True), sim_df], axis=1)
+            train_base = train_base[feature_cols + ["phenotype"]]
 
-        model = DeepHisCoM(nvar, node_num, layer_num, cov_num, act_fn, args.dropout_rate).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-        criterion = nn.BCELoss() if args.loss.lower() == "bceloss" else nn.MSELoss()
+            for permutation in range(args.perm):
+                torch.manual_seed(permutation)
+                random.seed(permutation)
+                np.random.seed(permutation)
+                train = train_base.copy()
+                if permutation != 0:
+                    train["phenotype"] = np.random.permutation(train["phenotype"])
+                ph = train["phenotype"]
+                train = (train - train.mean()) / train.std()
+                train["phenotype"] = ph
 
-        count = 0
-        best_param = None
-        scores = []
+                tensor = torch.from_numpy(train.values).float()
+                dataset = CustomDataset(tensor)
 
-        for epoch in range(10000):
-            batch_scores = []
-            for x_batch, y_batch in train_loader:
-                x_batch = x_batch.to(device)
-                y_batch = y_batch.to(device)
-                optimizer.zero_grad()
-                output = torch.squeeze(model(x_batch))
-                y_batch = torch.squeeze(y_batch)
-                loss = criterion(output, y_batch)
-                if args.reg_const_pathway_disease != 0:
-                    for param in model.fc_path_disease.parameters():
-                        if args.reg_type == "l1":
-                            loss = loss + args.reg_const_pathway_disease * torch.norm(param, 1)
-                        else:
-                            loss = loss + args.reg_const_pathway_disease * torch.norm(param, 2) ** 2
-                if args.reg_const_bio_pathway != 0:
-                    for param in model.pathway_nn.parameters():
-                        if args.reg_type == "l1":
-                            loss = loss + args.reg_const_bio_pathway * torch.norm(param, 1)
-                        else:
-                            loss = loss + args.reg_const_bio_pathway * torch.norm(param, 2) ** 2
-                loss.backward()
-                optimizer.step()
-                if args.stop_type == 1:
-                    batch_scores.append(-loss.item())
-                if args.stop_type == 2:
-                    if torch.sum(torch.isnan(output)) == 0:
-                        auc = roc_auc_score(y_batch.cpu().detach().numpy(), output.cpu().detach().numpy())
+                if 3 <= args.stop_type <= 4:
+                    t_idx, v_idx, _, _ = train_test_split(
+                        range(len(dataset)), dataset.y_data, stratify=dataset.y_data, test_size=args.divide_rate
+                    )
+                    train_split = Subset(dataset, t_idx)
+                    test_split = Subset(dataset, v_idx)
+                    if args.batch_size == 0:
+                        train_loader = DataLoader(train_split, batch_size=len(train_split), shuffle=True)
+                        test_loader = DataLoader(test_split, batch_size=len(test_split))
                     else:
-                        auc = 0
-                    batch_scores.append(auc)
-                if args.stop_type == 5:
-                    best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
-            if test_loader is not None:
-                for x_test, y_test in test_loader:
-                    x_test = x_test.to(device)
-                    y_test = y_test.to(device)
-                    output = torch.squeeze(model(x_test))
-                    y_test = torch.squeeze(y_test)
-                    if args.stop_type == 3:
-                        loss_test = criterion(output, y_test).item()
-                        batch_scores.append(-loss_test)
-                    if args.stop_type == 4:
-                        if torch.sum(torch.isnan(output)) == 0:
-                            auc_test = roc_auc_score(y_test.cpu().detach().numpy(), output.cpu().detach().numpy())
-                        else:
-                            auc_test = 0
-                        batch_scores.append(auc_test)
-            if args.stop_type in [1, 2, 3, 4]:
-                avg_score = sum(batch_scores) / len(batch_scores)
-                scores.append(avg_score)
-                if avg_score >= max(scores):
-                    count = 0
-                    best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
+                        train_loader = DataLoader(train_split, batch_size=args.batch_size, shuffle=True)
+                        test_loader = DataLoader(test_split, batch_size=args.batch_size)
                 else:
-                    count += 1
-                if count > args.count_lim:
-                    break
-            elif args.stop_type == 5:
-                if epoch > args.count_lim:
-                    break
-        if best_param is not None:
-            out_path = os.path.join(args.experiment_name, "tmp", f"param{permutation}.txt")
-            np.savetxt(out_path, best_param)
+                    if args.batch_size == 0:
+                        train_loader = DataLoader(dataset, batch_size=len(dataset), shuffle=True)
+                    else:
+                        train_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+                    test_loader = None
+
+                model = DeepHisCoM(nvar, node_num, layer_num, cov_num, act_fn, args.dropout_rate).to(device)
+                optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+                criterion = nn.BCELoss() if args.loss.lower() == "bceloss" else nn.MSELoss()
+
+                count = 0
+                best_param = None
+                scores = []
+
+                for epoch in range(10000):
+                    batch_scores = []
+                    for x_batch, y_batch in train_loader:
+                        x_batch = x_batch.to(device)
+                        y_batch = y_batch.to(device)
+                        optimizer.zero_grad()
+                        output = torch.squeeze(model(x_batch))
+                        y_batch = torch.squeeze(y_batch)
+                        loss = criterion(output, y_batch)
+                        if args.reg_const_pathway_disease != 0:
+                            for param in model.fc_path_disease.parameters():
+                                if args.reg_type == "l1":
+                                    loss = loss + args.reg_const_pathway_disease * torch.norm(param, 1)
+                                else:
+                                    loss = loss + args.reg_const_pathway_disease * torch.norm(param, 2) ** 2
+                        if args.reg_const_bio_pathway != 0:
+                            for param in model.pathway_nn.parameters():
+                                if args.reg_type == "l1":
+                                    loss = loss + args.reg_const_bio_pathway * torch.norm(param, 1)
+                                else:
+                                    loss = loss + args.reg_const_bio_pathway * torch.norm(param, 2) ** 2
+                        loss.backward()
+                        optimizer.step()
+                        if args.stop_type == 1:
+                            batch_scores.append(-loss.item())
+                        if args.stop_type == 2:
+                            if torch.sum(torch.isnan(output)) == 0:
+                                auc = roc_auc_score(y_batch.cpu().detach().numpy(), output.cpu().detach().numpy())
+                            else:
+                                auc = 0
+                            batch_scores.append(auc)
+                        if args.stop_type == 5:
+                            best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
+                    if test_loader is not None:
+                        for x_test, y_test in test_loader:
+                            x_test = x_test.to(device)
+                            y_test = y_test.to(device)
+                            output = torch.squeeze(model(x_test))
+                            y_test = torch.squeeze(y_test)
+                            if args.stop_type == 3:
+                                loss_test = criterion(output, y_test).item()
+                                batch_scores.append(-loss_test)
+                            if args.stop_type == 4:
+                                if torch.sum(torch.isnan(output)) == 0:
+                                    auc_test = roc_auc_score(y_test.cpu().detach().numpy(), output.cpu().detach().numpy())
+                                else:
+                                    auc_test = 0
+                                batch_scores.append(auc_test)
+                    if args.stop_type in [1, 2, 3, 4]:
+                        avg_score = sum(batch_scores) / len(batch_scores)
+                        scores.append(avg_score)
+                        if avg_score >= max(scores):
+                            count = 0
+                            best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
+                        else:
+                            count += 1
+                        if count > args.count_lim:
+                            break
+                    elif args.stop_type == 5:
+                        if epoch > args.count_lim:
+                            break
+                if best_param is not None:
+                    out_dir = os.path.join(args.simulation_dir, str(sim_num), experiment, str(permutation))
+                    os.makedirs(out_dir, exist_ok=True)
+                    np.savetxt(os.path.join(out_dir, "param.txt"), best_param)
 
 
 if __name__ == "__main__":
