@@ -161,6 +161,7 @@ def main() -> None:
         act_fn = act_fn()
 
     os.chdir(args.dir)
+    os.makedirs(os.path.join(args.experiment_name, "tmp"), exist_ok=True)
 
     # load data
     df_meta = pd.read_csv("181_metabolite_clinical.csv", index_col=0)
@@ -182,12 +183,24 @@ def main() -> None:
     met_columns = annot["metabolite"].unique().tolist()
     metabolite = metabolite[met_columns]
 
+    sim_df = pd.read_csv(args.scenario)
+    out_col = [c for c in sim_df.columns if c.startswith("y_")][0]
+    sim_df = sim_df[[out_col]].rename(columns={out_col: "phenotype"})
+    train_base = pd.concat([metabolite.reset_index(drop=True), sim_df], axis=1)
+
+    eps = 1e-6
+    X_log = np.log(metabolite.values + eps)
+    X_scaled = StandardScaler().fit_transform(X_log)
+    df_scaled = pd.DataFrame(X_scaled, columns=metabolite.columns)
+    train_base.loc[:, metabolite.columns] = df_scaled
+
     groupunique = list(OrderedDict.fromkeys(annot["group"]))
     nvar = [sum(annot["group"] == g) for g in groupunique]
 
     feature_cols = []
     for g in groupunique:
         feature_cols.extend(annot[annot["group"] == g]["metabolite"].tolist())
+    train_base = train_base[feature_cols + ["phenotype"]]
 
     node_num = pd.read_csv("layerinfo.csv")["node_num"].tolist()
     layer_num = pd.read_csv("layerinfo.csv")["layer_num"].tolist()
