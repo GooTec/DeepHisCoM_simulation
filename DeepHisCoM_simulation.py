@@ -162,7 +162,8 @@ def main() -> None:
         act_fn = act_fn()
 
     os.chdir(args.dir)
-    os.makedirs(os.path.join(args.experiment_name, "tmp"), exist_ok=True)
+    # prepare experiment directory
+    os.makedirs(args.experiment_name, exist_ok=True)
 
     # load data
     df_meta = pd.read_csv("181_metabolite_clinical.csv", index_col=0)
@@ -222,6 +223,8 @@ def main() -> None:
 
     for scenario_path in scenario_paths:
         experiment = os.path.splitext(os.path.basename(scenario_path))[0]
+        sim_num = os.path.basename(os.path.dirname(scenario_path))
+        print(f"Starting simulation {sim_num} experiment {experiment}")
         sim_df = pd.read_csv(scenario_path)
         out_col = [c for c in sim_df.columns if c.startswith("y_")][0]
         sim_df = sim_df[[out_col]].rename(columns={out_col: "phenotype"})
@@ -231,6 +234,7 @@ def main() -> None:
         train_base = train_base[feature_cols + ["phenotype"]]
 
         for permutation in range(args.perm):
+            print(f"Simulation {sim_num}, permutation {permutation}")
             torch.manual_seed(permutation)
             random.seed(permutation)
             np.random.seed(permutation)
@@ -333,7 +337,7 @@ def main() -> None:
                     if epoch > args.count_lim:
                         break
             if best_param is not None:
-                out_dir = os.path.join(os.path.dirname(scenario_path), experiment, str(permutation))
+                out_dir = os.path.join(args.experiment_name, str(sim_num), experiment, str(permutation))
                 os.makedirs(out_dir, exist_ok=True)
                 np.savetxt(os.path.join(out_dir, "param.txt"), best_param)
 
