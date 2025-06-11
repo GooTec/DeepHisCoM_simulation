@@ -313,6 +313,7 @@ def main() -> None:
         best_lr = args.learning_rate
         best_bs = args.batch_size
         best_val = float("-inf")
+        best_param = None
         for permutation in range(args.perm):
             print(f"Simulation {sim_num}, permutation {permutation}")
             torch.manual_seed(permutation)
@@ -376,7 +377,8 @@ def main() -> None:
                 args.batch_size = best_bs
                 out_dir = os.path.join(args.experiment_name, str(sim_num), experiment, str(permutation))
                 os.makedirs(out_dir, exist_ok=True)
-                np.savetxt(os.path.join(out_dir, "param.txt"), best_param)
+                if best_param is not None:
+                    np.savetxt(os.path.join(out_dir, "param.txt"), best_param)
             else:
                 train_loader, test_loader = build_loader(args.batch_size)
                 param, _ = train_model(
