@@ -1,0 +1,135 @@
+# Byte-compiled / optimized / DLL files
+
+**pycache**/
+\*.py\[cod]
+\*\$py.class
+
+# C extensions
+
+\*.so
+
+# Distribution / packaging
+
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+\*.egg-info/
+.installed.cfg
+\*.egg
+MANIFEST
+
+# Virtual environments
+
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# pipenv
+
+Pipfile.lock
+
+# Poetry
+
+poetry.lock
+
+# Mypy
+
+.mypy\_cache/
+.dmypy.json
+
+dmypy.json
+
+# pyre
+
+.pyre/
+
+# pytype
+
+.pytype/
+
+# Coverage and testing
+
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.\*
+.cache
+.pytest\_cache/
+nosetests.xml
+coverage.xml
+\*.cover
+
+# Translations
+
+\*.mo
+\*.pot
+
+# Django stuff:
+
+\*.log
+local\_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+
+.scrapy
+
+# Sphinx documentation
+
+docs/\_build/
+
+# PyBuilder
+
+target/
+
+# Jupyter Notebook
+
+.ipynb\_checkpoints
+
+# IPython
+
+profile\_default/
+ipython\_config.py
+
+# pyenv
+
+.python-version
+
+# Environment files
+
+.env
+.env.\*
+.venv
+
+# IDEs and editors
+
+.vscode/
+.idea/
+
+# macOS
+
+.DS\_Store
+
+# Logs and databases
+
+\*.log
+\*.sql
+\*.sqlite
+*.csv

@@ -1,0 +1,35 @@
+short	MetaboAnalyst_matching_result	KEGG_C
+Ala	L-Alanine	C00041
+Arg	L-Arginine	C00062
+Asn	L-Asparagine	C00152
+Asp	L-Aspartic acid	C00049
+Cit	Citrulline	C00327
+Gln	L-Glutamine	C00064
+Glu	L-Glutamic acid	C00025
+Gly	Glycine	C00037
+His	L-Histidine	C00135
+Ile	L-Isoleucine	C00407
+Leu	L-Leucine	C00123
+Lys	L-Lysine	C00047
+Met	L-Methionine	C00073
+Orn	Ornithine	C00077
+Phe	L-Phenylalanine	C00079
+Pro	L-Proline	C00148
+Ser	L-Serine	C00065
+Thr	L-Threonine	C00188
+Trp	L-Tryptophan	C00078
+Tyr	L-Tyrosine	C00082
+Val	L-Valine	C00183
+Ac-Orn	N-Acetylornithine	C00437
+ADMA	Asymmetric dimethylarginine	C03626
+alpha-AAA	Aminoadipic acid	C00956
+Kynurenine	L-Kynurenine	C00328
+Met-SO	L-Methionine S-oxide	C02989
+Serotonin	Serotonin	C00780
+t4-OH-Pro	4-Hydroxyproline	C01157
+Taurine	Taurine	C00245
+Creatinine	Creatinine	C00791
+Putrescine	Putrescine	C00134
+Spermidine	Spermidine	C00315
+Spermine	Spermine	C00750
+Azelaic acid	Azelaic acid	C08261
