@@ -168,14 +168,20 @@ def main() -> None:
     metabolite = df_meta.iloc[:, 14:]
 
     mapping = load_mapping(args.mapping_file)
-    annot_rows = []
+    group_to_feats = {}
     for group, mets in mapping.items():
+        valid = [m for m in mets if m in metabolite.columns]
+        if valid:
+            group_to_feats[group] = valid
+
+    annot_rows = []
+    for group, mets in group_to_feats.items():
         for m in mets:
             annot_rows.append({"metabolite": m, "group": group})
     annot = pd.DataFrame(annot_rows)
 
-    # keep only metabolites present in mapping
-    metabolite = metabolite[annot["metabolite"].unique()]
+    met_columns = annot["metabolite"].unique().tolist()
+    metabolite = metabolite[met_columns]
 
     sim_df = pd.read_csv(args.scenario)
     out_col = [c for c in sim_df.columns if c.startswith("y_")][0]
