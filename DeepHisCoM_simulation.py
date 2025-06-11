@@ -143,6 +143,83 @@ def parse_args():
     return parser.parse_args()
 
 
+def train_model(train_loader: DataLoader, test_loader: DataLoader, lr: float, args, device,
+                nvar, node_num, layer_num, cov_num, act_fn):
+    """Train DeepHisCoM once and return best parameter and validation score."""
+    model = DeepHisCoM(nvar, node_num, layer_num, cov_num, act_fn, args.dropout_rate).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    criterion = nn.BCELoss() if args.loss.lower() == "bceloss" else nn.MSELoss()
+
+    count = 0
+    best_param = None
+    scores = []
+    best_score = float("-inf")
+
+    for epoch in range(10000):
+        batch_scores = []
+        for x_batch, y_batch in train_loader:
+            x_batch = x_batch.to(device)
+            y_batch = y_batch.to(device)
+            optimizer.zero_grad()
+            output = torch.squeeze(model(x_batch))
+            y_batch = torch.squeeze(y_batch)
+            loss = criterion(output, y_batch)
+            if args.reg_const_pathway_disease != 0:
+                for param in model.fc_path_disease.parameters():
+                    if args.reg_type == "l1":
+                        loss = loss + args.reg_const_pathway_disease * torch.norm(param, 1)
+                    else:
+                        loss = loss + args.reg_const_pathway_disease * torch.norm(param, 2) ** 2
+            if args.reg_const_bio_pathway != 0:
+                for param in model.pathway_nn.parameters():
+                    if args.reg_type == "l1":
+                        loss = loss + args.reg_const_bio_pathway * torch.norm(param, 1)
+                    else:
+                        loss = loss + args.reg_const_bio_pathway * torch.norm(param, 2) ** 2
+            loss.backward()
+            optimizer.step()
+            if args.stop_type == 1:
+                batch_scores.append(-loss.item())
+            if args.stop_type == 2:
+                if torch.sum(torch.isnan(output)) == 0:
+                    auc = roc_auc_score(y_batch.cpu().detach().numpy(), output.cpu().detach().numpy())
+                else:
+                    auc = 0
+                batch_scores.append(auc)
+            if args.stop_type == 5:
+                best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
+        if test_loader is not None:
+            for x_test, y_test in test_loader:
+                x_test = x_test.to(device)
+                y_test = y_test.to(device)
+                output = torch.squeeze(model(x_test))
+                y_test = torch.squeeze(y_test)
+                if args.stop_type == 3:
+                    loss_test = criterion(output, y_test).item()
+                    batch_scores.append(-loss_test)
+                if args.stop_type == 4:
+                    if torch.sum(torch.isnan(output)) == 0:
+                        auc_test = roc_auc_score(y_test.cpu().detach().numpy(), output.cpu().detach().numpy())
+                    else:
+                        auc_test = 0
+                    batch_scores.append(auc_test)
+        if args.stop_type in [1, 2, 3, 4]:
+            avg_score = sum(batch_scores) / len(batch_scores)
+            scores.append(avg_score)
+            if avg_score >= max(scores):
+                count = 0
+                best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
+                best_score = avg_score
+            else:
+                count += 1
+            if count > args.count_lim:
+                break
+        elif args.stop_type == 5:
+            if epoch > args.count_lim:
+                break
+    return best_param, best_score
+
+
 # ---------------------------------------------------------------------------
 # Main logic
 # ---------------------------------------------------------------------------
@@ -233,6 +310,9 @@ def main() -> None:
         )
         train_base = train_base[feature_cols + ["phenotype"]]
 
+        best_lr = args.learning_rate
+        best_bs = args.batch_size
+        best_val = float("-inf")
         for permutation in range(args.perm):
             print(f"Simulation {sim_num}, permutation {permutation}")
             torch.manual_seed(permutation)
@@ -248,98 +328,77 @@ def main() -> None:
             tensor = torch.from_numpy(train.values).float()
             dataset = CustomDataset(tensor)
 
-            if 3 <= args.stop_type <= 4:
-                t_idx, v_idx, _, _ = train_test_split(
-                    range(len(dataset)), dataset.y_data, stratify=dataset.y_data, test_size=args.divide_rate
-                )
-                train_split = Subset(dataset, t_idx)
-                test_split = Subset(dataset, v_idx)
-                if args.batch_size == 0:
-                    train_loader = DataLoader(train_split, batch_size=len(train_split), shuffle=True)
-                    test_loader = DataLoader(test_split, batch_size=len(test_split))
-                else:
-                    train_loader = DataLoader(train_split, batch_size=args.batch_size, shuffle=True)
-                    test_loader = DataLoader(test_split, batch_size=args.batch_size)
-            else:
-                if args.batch_size == 0:
-                    train_loader = DataLoader(dataset, batch_size=len(dataset), shuffle=True)
-                else:
-                    train_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-                test_loader = None
-
-            model = DeepHisCoM(nvar, node_num, layer_num, cov_num, act_fn, args.dropout_rate).to(device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-            criterion = nn.BCELoss() if args.loss.lower() == "bceloss" else nn.MSELoss()
-
-            count = 0
-            best_param = None
-            scores = []
-
-            for epoch in range(10000):
-                batch_scores = []
-                for x_batch, y_batch in train_loader:
-                    x_batch = x_batch.to(device)
-                    y_batch = y_batch.to(device)
-                    optimizer.zero_grad()
-                    output = torch.squeeze(model(x_batch))
-                    y_batch = torch.squeeze(y_batch)
-                    loss = criterion(output, y_batch)
-                    if args.reg_const_pathway_disease != 0:
-                        for param in model.fc_path_disease.parameters():
-                            if args.reg_type == "l1":
-                                loss = loss + args.reg_const_pathway_disease * torch.norm(param, 1)
-                            else:
-                                loss = loss + args.reg_const_pathway_disease * torch.norm(param, 2) ** 2
-                    if args.reg_const_bio_pathway != 0:
-                        for param in model.pathway_nn.parameters():
-                            if args.reg_type == "l1":
-                                loss = loss + args.reg_const_bio_pathway * torch.norm(param, 1)
-                            else:
-                                loss = loss + args.reg_const_bio_pathway * torch.norm(param, 2) ** 2
-                    loss.backward()
-                    optimizer.step()
-                    if args.stop_type == 1:
-                        batch_scores.append(-loss.item())
-                    if args.stop_type == 2:
-                        if torch.sum(torch.isnan(output)) == 0:
-                            auc = roc_auc_score(y_batch.cpu().detach().numpy(), output.cpu().detach().numpy())
-                        else:
-                            auc = 0
-                        batch_scores.append(auc)
-                    if args.stop_type == 5:
-                        best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
-                if test_loader is not None:
-                    for x_test, y_test in test_loader:
-                        x_test = x_test.to(device)
-                        y_test = y_test.to(device)
-                        output = torch.squeeze(model(x_test))
-                        y_test = torch.squeeze(y_test)
-                        if args.stop_type == 3:
-                            loss_test = criterion(output, y_test).item()
-                            batch_scores.append(-loss_test)
-                        if args.stop_type == 4:
-                            if torch.sum(torch.isnan(output)) == 0:
-                                auc_test = roc_auc_score(y_test.cpu().detach().numpy(), output.cpu().detach().numpy())
-                            else:
-                                auc_test = 0
-                            batch_scores.append(auc_test)
-                if args.stop_type in [1, 2, 3, 4]:
-                    avg_score = sum(batch_scores) / len(batch_scores)
-                    scores.append(avg_score)
-                    if avg_score >= max(scores):
-                        count = 0
-                        best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
+            def build_loader(bs: int):
+                if 3 <= args.stop_type <= 4:
+                    t_idx, v_idx, _, _ = train_test_split(
+                        range(len(dataset)), dataset.y_data, stratify=dataset.y_data, test_size=args.divide_rate
+                    )
+                    train_split = Subset(dataset, t_idx)
+                    test_split = Subset(dataset, v_idx)
+                    if bs == 0:
+                        tl = DataLoader(train_split, batch_size=len(train_split), shuffle=True)
+                        vl = DataLoader(test_split, batch_size=len(test_split))
                     else:
-                        count += 1
-                    if count > args.count_lim:
-                        break
-                elif args.stop_type == 5:
-                    if epoch > args.count_lim:
-                        break
-            if best_param is not None:
+                        tl = DataLoader(train_split, batch_size=bs, shuffle=True)
+                        vl = DataLoader(test_split, batch_size=bs)
+                else:
+                    if bs == 0:
+                        tl = DataLoader(dataset, batch_size=len(dataset), shuffle=True)
+                    else:
+                        tl = DataLoader(dataset, batch_size=bs, shuffle=True)
+                    vl = None
+                return tl, vl
+
+            if permutation == 0:
+                lr_list = [args.learning_rate, args.learning_rate * 0.1, args.learning_rate * 0.01]
+                bs_list = [args.batch_size] if args.batch_size != 0 else [16, 32, 64]
+                for lr_c in lr_list:
+                    for bs_c in bs_list:
+                        train_loader, test_loader = build_loader(bs_c)
+                        param, score = train_model(
+                            train_loader,
+                            test_loader,
+                            lr_c,
+                            args,
+                            device,
+                            nvar,
+                            node_num,
+                            layer_num,
+                            cov_num,
+                            act_fn,
+                        )
+                        if score > best_val:
+                            best_val = score
+                            best_lr = lr_c
+                            best_bs = bs_c
+                            best_param = param
+                args.learning_rate = best_lr
+                args.batch_size = best_bs
                 out_dir = os.path.join(args.experiment_name, str(sim_num), experiment, str(permutation))
                 os.makedirs(out_dir, exist_ok=True)
                 np.savetxt(os.path.join(out_dir, "param.txt"), best_param)
+            else:
+                train_loader, test_loader = build_loader(args.batch_size)
+                param, _ = train_model(
+                    train_loader,
+                    test_loader,
+                    args.learning_rate,
+                    args,
+                    device,
+                    nvar,
+                    node_num,
+                    layer_num,
+                    cov_num,
+                    act_fn,
+                )
+                if param is not None:
+                    out_dir = os.path.join(args.experiment_name, str(sim_num), experiment, str(permutation))
+                    os.makedirs(out_dir, exist_ok=True)
+                    np.savetxt(os.path.join(out_dir, "param.txt"), param)
+
+        print(
+            f"Best validation score for original data (lr={best_lr}, batch_size={best_bs}): {best_val}"
+        )
 
 
 if __name__ == "__main__":
