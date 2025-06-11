@@ -217,6 +217,11 @@ def train_model(train_loader: DataLoader, test_loader: DataLoader, lr: float, ar
         elif args.stop_type == 5:
             if epoch > args.count_lim:
                 break
+
+    # if no early stopping criterion selected, capture the final parameters
+    if best_param is None:
+        best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
+
     return best_param, best_score
 
 
