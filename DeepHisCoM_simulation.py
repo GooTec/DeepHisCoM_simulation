@@ -174,7 +174,7 @@ def main():
         for sim in range(args.start_sim, end+1):
             sims += sorted(glob(os.path.join(args.simulation_dir, str(sim), "*.csv")))
 
-    lr_list = [1e-4, 5e-4, 1e-3, 5e-3, 1e-2]
+    lr_list = [0.01]
     bs_list = [16, 32, 64]
 
     for path in sims:
