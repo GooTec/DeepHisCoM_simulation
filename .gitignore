@@ -133,3 +133,5 @@ ipython\_config.py
 \*.sql
 \*.sqlite
 *.csv
+param.txt
+*.set
