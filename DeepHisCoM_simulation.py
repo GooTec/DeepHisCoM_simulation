@@ -159,11 +159,17 @@ def main():
     df_meta = pd.read_csv("181_metabolite_clinical.csv", index_col=0)
     metabolite = df_meta.iloc[:,14:]
     mapping = load_mapping(args.mapping_file)
-    annot = pd.DataFrame([{"metabolite":m,"group":g} for g,ms in mapping.items() for m in ms if m in metabolite.columns])
-    metabolite = metabolite[annot["metabolite"].unique()]
-    eps=1e-6; X_log=np.log(metabolite.values+eps)
-    X_scaled=StandardScaler().fit_transform(X_log); metabolite_scaled=pd.DataFrame(X_scaled,columns=metabolite.columns)
-    groups=list(OrderedDict.fromkeys(annot["group"])); nvar=[sum(annot["group"]==g) for g in groups]
+    annot = pd.DataFrame(
+        [{"metabolite": m, "group": g} for g, ms in mapping.items() for m in ms if m in metabolite.columns]
+    )
+    annot_unique = annot.drop_duplicates(subset="metabolite", keep="first")
+    metabolite = metabolite[annot_unique["metabolite"].tolist()]
+    eps = 1e-6
+    X_log = np.log(metabolite.values + eps)
+    X_scaled = StandardScaler().fit_transform(X_log)
+    metabolite_scaled = pd.DataFrame(X_scaled, columns=metabolite.columns)
+    groups = list(OrderedDict.fromkeys(annot_unique["group"]))
+    nvar = [sum(annot_unique["group"] == g) for g in groups]
     li=pd.read_csv("layerinfo.csv"); width=li["node_num"].tolist(); layer=li["layer_num"].tolist()
     cov_num=0;  
     if os.path.exists("cov.csv"): cov_num=len(pd.read_csv("cov.csv"))
