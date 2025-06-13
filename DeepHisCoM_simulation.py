@@ -145,7 +145,7 @@ def main():
     parser.add_argument("--leakyrelu_const", type=float, default=0.2)
     parser.add_argument("--dropout_rate", type=float, default=0.5)
     parser.add_argument("--experiment_name", type=str, default="exp")
-    parser.add_argument("--mapping_file", type=str, default="metabolite_mapping.set")
+    parser.add_argument("--mapping_file", type=str, default="metabolite_mapping_intersection.set")
     parser.add_argument("--scenario", type=str)
     args = parser.parse_args()
 
@@ -159,18 +159,56 @@ def main():
     df_meta = pd.read_csv("181_metabolite_clinical.csv", index_col=0)
     metabolite = df_meta.iloc[:,14:]
     mapping = load_mapping(args.mapping_file)
-    annot = pd.DataFrame(
-        [{"metabolite": m, "group": g} for g, ms in mapping.items() for m in ms if m in metabolite.columns]
-    )
-    annot_unique = annot.drop_duplicates(subset="metabolite", keep="first")
-    metabolite = metabolite[annot_unique["metabolite"].tolist()]
+
+    annot_rows = []
+    for g, ms in mapping.items():
+        for m in ms:
+            if m in metabolite.columns:          # 데이터에 실제 존재하는 변수만
+                annot_rows.append({"metabolite": m, "group": g})
+
+    annot = pd.DataFrame(annot_rows)
+
+    # -----------------------------------------------------------------
+    # ❷ 중복-대사체 제거 + pathway 정리
+    #     ↳ 한 대사체가 여러 그룹에 있을 경우, "첫 번째 등장"에만 남김
+    # -----------------------------------------------------------------
+    seen   = set()
+    groups = []          # pathway 순서
+    cols_by_group = []   # pathway별 고유 column 리스트
+
+    for g in annot["group"].unique():            # 입력 파일 순서 유지
+        cols = [m for m in annot.loc[annot.group == g, "metabolite"]
+                if m not in seen]
+        if len(cols) == 0:                       # 실제 변수 0개인 pathway는 건너뜀
+            continue
+        seen.update(cols)
+        groups.append(g)
+        cols_by_group.append(cols)
+
+    # -----------------------------------------------------------------
+    # ❸ 최종 feature 열 재배열
+    # -----------------------------------------------------------------
+    ordered_cols = [c for sub in cols_by_group for c in sub]
+    metabolite   = metabolite[ordered_cols]      # <<— 새 순서 적용
+    nvar         = [len(sub) for sub in cols_by_group]
+
+    assert sum(nvar) == metabolite.shape[1], \
+        f"nvar 합({sum(nvar)}) != feature 개수({metabolite.shape[1]}) — 매핑 파일 점검 필요"
+
+    # -----------------------------------------------------------------
+    # ❹ log 변환·스케일링 이후 동일
+    # -----------------------------------------------------------------
     eps = 1e-6
-    X_log = np.log(metabolite.values + eps)
+    X_log    = np.log(metabolite.values + eps)
     X_scaled = StandardScaler().fit_transform(X_log)
     metabolite_scaled = pd.DataFrame(X_scaled, columns=metabolite.columns)
-    groups = list(OrderedDict.fromkeys(annot_unique["group"]))
-    nvar = [sum(annot_unique["group"] == g) for g in groups]
-    li=pd.read_csv("layerinfo.csv"); width=li["node_num"].tolist(); layer=li["layer_num"].tolist()
+
+    # layerinfo.csv 길이 맞추기
+    li    = pd.read_csv("layerinfo.csv")
+    width = li["node_num"].tolist() [:len(nvar)]
+    layer = li["layer_num"].tolist()[:len(nvar)]
+    assert len(width) == len(layer) == len(nvar), \
+        "layerinfo.csv 행 수가 pathway 수와 다릅니다."
     cov_num=0;  
     if os.path.exists("cov.csv"): cov_num=len(pd.read_csv("cov.csv"))
 
