@@ -41,8 +41,15 @@ def compute_pvalues(base_dir: str, groups: list, n_perm: int = 100) -> None:
     perm_params = []
     for p in range(1, n_perm + 1):
         param_path = os.path.join(base_dir, str(p), "param.txt")
-        if os.path.exists(param_path):
-            perm_params.append(np.loadtxt(param_path, ndmin=1))
+        if not os.path.exists(param_path):
+            continue
+        vals = np.loadtxt(param_path, ndmin=1)
+        if vals.shape != obs_param.shape:
+            print(
+                f"Warning: {param_path} shape {vals.shape} != observed {obs_param.shape}. skipping"
+            )
+            continue
+        perm_params.append(vals)
     if not perm_params:
         return
     perm_params = np.stack(perm_params, axis=0)
