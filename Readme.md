@@ -123,7 +123,10 @@ Procedure
    - Shuffle phenotype
    - Train DeepHisCoM
    - Track AUC / loss
-   - Save best weights to exp/tmp/param{perm}.txt
+   - Save best weights to `exp/tmp/param{perm}.txt`
+   - For the original data (perm=0) also write validation AUC to
+     `exp/tmp/val_auc.txt` and store per-sample predictions in
+     `exp/tmp/val_pred.txt`
 
 ---
 

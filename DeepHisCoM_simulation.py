@@ -93,12 +93,13 @@ class DeepHisCoM(nn.Module):
 # Training per permutation with early stopping
 # ---------------------------------------------------------------------------
 
-def train_once(train_loader, val_loader, lr, bs, args, device, nvar, width, layer, cov_num, act_fn):
+def train_once(train_loader, val_loader, lr, bs, args, device, nvar, width, layer, cov_num, act_fn, return_predictions=False):
     model = DeepHisCoM(nvar, width, layer, cov_num, act_fn, args.dropout_rate).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.BCELoss() if args.loss.lower() == "bceloss" else nn.MSELoss()
 
     best_auc = -np.inf; best_param = None; patience_cnt = 0
+    best_ids, best_probs, best_labels = None, None, None
     for epoch in range(1, args.max_epochs + 1):
         model.train(); losses = []
         for x_batch, y_batch in train_loader:
@@ -111,10 +112,17 @@ def train_once(train_loader, val_loader, lr, bs, args, device, nvar, width, laye
             for x_val, y_val in val_loader:
                 pred = model(x_val.to(device)).squeeze().cpu().numpy()
                 preds.extend(pred.tolist()); labels.extend(y_val.squeeze().numpy().tolist())
+        val_indices = getattr(val_loader.dataset, "indices", list(range(len(val_loader.dataset))))
         val_auc = roc_auc_score(labels, preds)
         
         if val_auc > best_auc:
-            best_auc = val_auc; best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]; patience_cnt = 0
+            best_auc = val_auc
+            best_param = model.fc_path_disease.weight.detach().cpu().numpy()[0]
+            if return_predictions:
+                best_ids = val_indices
+                best_probs = preds.copy()
+                best_labels = labels.copy()
+            patience_cnt = 0
         else:
             patience_cnt += 1
             if patience_cnt >= args.patience:
@@ -122,6 +130,8 @@ def train_once(train_loader, val_loader, lr, bs, args, device, nvar, width, laye
                 # print(f"Epoch {epoch:03d} | lr={lr:.4f}, bs={bs} | Loss={np.mean(losses):.4f} | Val AUC={val_auc:.4f}")
                 break
         
+    if return_predictions:
+        return best_param, best_auc, (best_ids, best_probs, best_labels)
     return best_param, best_auc
 
 # ---------------------------------------------------------------------------
@@ -266,11 +276,23 @@ def main():
                 range(len(ds)), ds.y_data, stratify=ds.y_data, test_size=0.2)
             tl = DataLoader(Subset(ds, idx_t), batch_size=best_bs, shuffle=True)
             vl = DataLoader(Subset(ds, idx_v), batch_size=best_bs)
-            param, auc = train_once(tl, vl, best_lr, best_bs, args, device, nvar, width, layer, cov_num, act_fn)
+            if perm == 0:
+                param, auc, (val_ids, val_probs, val_labels) = train_once(
+                    tl, vl, best_lr, best_bs, args, device, nvar, width, layer, cov_num, act_fn, return_predictions=True)
+            else:
+                param, auc = train_once(
+                    tl, vl, best_lr, best_bs, args, device, nvar, width, layer, cov_num, act_fn)
             outd = os.path.join(args.experiment_name, sim_num, exp, str(perm))
             os.makedirs(outd, exist_ok=True)
             np.savetxt(os.path.join(outd, "param.txt"), param)
             if perm == 0:
                 print(f"Original AUC: {auc:.4f}")
+                with open(os.path.join(outd, "val_auc.txt"), "w") as f:
+                    f.write(f"{auc}\n")
+                pred_file = os.path.join(outd, "val_pred.txt")
+                with open(pred_file, "w") as f:
+                    f.write("sampleID\tprob\tlabel\n")
+                    for sid, pr, lb in zip(val_ids, val_probs, val_labels):
+                        f.write(f"{sid}\t{pr}\t{int(lb)}\n")
 
 if __name__ == "__main__": main()
