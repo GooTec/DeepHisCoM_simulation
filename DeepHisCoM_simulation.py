@@ -19,7 +19,8 @@ from torch.utils.data import Dataset, DataLoader, Subset
 # ---------------------------------------------------------------------------
 
 def load_mapping(path: str) -> dict:
-    mapping = {}
+    """Return pathway->metabolite mapping preserving file order."""
+    mapping = OrderedDict()
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -169,21 +170,19 @@ def main():
     annot = pd.DataFrame(annot_rows)
 
     # -----------------------------------------------------------------
-    # ❷ 중복-대사체 제거 + pathway 정리
-    #     ↳ 한 대사체가 여러 그룹에 있을 경우, "첫 번째 등장"에만 남김
+    # ❷ pathway 정리: 입력 파일 순서대로 metabolite 목록 정리
+    #     ↳ 동일 metabolite가 여러 pathway에 존재하면 모두 포함시킴
     # -----------------------------------------------------------------
-    seen   = set()
-    groups = []          # pathway 순서
-    cols_by_group = []   # pathway별 고유 column 리스트
-
-    for g in annot["group"].unique():            # 입력 파일 순서 유지
-        cols = [m for m in annot.loc[annot.group == g, "metabolite"]
-                if m not in seen]
-        if len(cols) == 0:                       # 실제 변수 0개인 pathway는 건너뜀
+    groups = list(OrderedDict.fromkeys(annot["group"]))
+    cols_by_group = []
+    valid_groups = []
+    for g in groups:
+        cols = annot.loc[annot.group == g, "metabolite"].tolist()
+        if len(cols) == 0:          # 실제 변수 0개인 pathway는 건너뜀
             continue
-        seen.update(cols)
-        groups.append(g)
+        valid_groups.append(g)
         cols_by_group.append(cols)
+    groups = valid_groups
 
     # -----------------------------------------------------------------
     # ❸ 최종 feature 열 재배열
