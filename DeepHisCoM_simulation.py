@@ -272,5 +272,7 @@ def main():
             np.savetxt(os.path.join(outd, "param.txt"), param)
             if perm == 0:
                 print(f"Original AUC: {auc:.4f}")
+                with open(os.path.join(outd, "val_auc.txt"), "w") as f:
+                    f.write(f"{auc}\n")
 
 if __name__ == "__main__": main()
