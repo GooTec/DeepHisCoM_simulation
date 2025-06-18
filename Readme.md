@@ -153,12 +153,17 @@ jupyter nbconvert --execute DeepHisCoM_simulation.ipynb \
 ### Empirical Power & FDR
 
 After computing permutation p-values with `compute_pvalues.py`, you can
-summarize empirical power and the false discovery rate:
+summarize empirical power and the false discovery rate for each simulation
+condition:
 
 ```bash
 python analyze_power_fdr.py
 # The script will prompt for the result directory (e.g. `exp`)
 ```
+The script collects all `pvalue.csv` files under
+`<dir>/<simulation_number>/<condition>/` and generates per-condition plots
+(`empirical_power_<condition>.png`, `fdr_<condition>.png`) along with a
+`power_fdr_summary.csv` table in the provided directory.
 
 ---
 

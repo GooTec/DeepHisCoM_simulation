@@ -19,13 +19,13 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
     alpha : float, default 0.05
         Significance threshold for declaring discoveries.
 
-    Saves ``empirical_power.png`` and ``fdr.png`` in ``result_dir`` and
-    prints a summary table.
+    Saves per-experiment ``empirical_power_<cond>.png`` and ``fdr_<cond>.png``
+    in ``result_dir`` and prints a summary table.
     """
     if true_groups is None:
         true_groups = ["map00400", "map00860"]
 
-    pval_tables = []
+    pval_by_exp: dict[str, list[pd.DataFrame]] = {}
     for sim in sorted(os.listdir(result_dir)):
         sim_dir = os.path.join(result_dir, sim)
         if not os.path.isdir(sim_dir):
@@ -36,48 +36,61 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
                 continue
             df = pd.read_csv(pv_path)
             df["simulation"] = sim
-            df["experiment"] = exp
-            pval_tables.append(df)
+            pval_by_exp.setdefault(exp, []).append(df)
 
-    if not pval_tables:
+    if not pval_by_exp:
         print("No pvalue.csv files were found in the given directory.")
         return
 
-    df_all = pd.concat(pval_tables, ignore_index=True)
-    df_all["reject"] = df_all["pvalue"] <= alpha
+    summary_rows = []
 
-    power_df = (
-        df_all[df_all["pathway"].isin(true_groups)]
-        .groupby("pathway")["reject"]
-        .mean()
-        .reset_index(name="empirical_power")
-    )
+    for exp, tables in sorted(pval_by_exp.items()):
+        df_all = pd.concat(tables, ignore_index=True)
+        df_all["reject"] = df_all["pvalue"] <= alpha
 
-    total_rejects = int(df_all["reject"].sum())
-    false_rejects = df_all[~df_all["pathway"].isin(true_groups) & df_all["reject"]]
-    fdr = len(false_rejects) / total_rejects if total_rejects else 0.0
+        power_df = (
+            df_all[df_all["pathway"].isin(true_groups)]
+            .groupby("pathway")["reject"]
+            .mean()
+            .reset_index(name="empirical_power")
+        )
 
-    # Plot empirical power
-    ax = power_df.plot(kind="bar", x="pathway", y="empirical_power", legend=False)
-    ax.set_xlabel("Pathway")
-    ax.set_ylabel("Empirical Power")
-    ax.set_ylim(0, 1)
-    ax.set_title(f"Empirical Power (alpha={alpha})")
-    plt.tight_layout()
-    plt.savefig(os.path.join(result_dir, "empirical_power.png"))
-    plt.close()
+        total_rejects = int(df_all["reject"].sum())
+        false_rejects = df_all[~df_all["pathway"].isin(true_groups) & df_all["reject"]]
+        fdr = len(false_rejects) / total_rejects if total_rejects else 0.0
 
-    # Plot FDR
-    plt.bar(["FDR"], [fdr])
-    plt.ylim(0, 1)
-    plt.ylabel("FDR")
-    plt.title(f"False Discovery Rate (alpha={alpha})")
-    plt.tight_layout()
-    plt.savefig(os.path.join(result_dir, "fdr.png"))
-    plt.close()
+        # Plot empirical power for this experiment
+        ax = power_df.plot(kind="bar", x="pathway", y="empirical_power", legend=False)
+        ax.set_xlabel("Pathway")
+        ax.set_ylabel("Empirical Power")
+        ax.set_ylim(0, 1)
+        ax.set_title(f"{exp} (alpha={alpha})")
+        plt.tight_layout()
+        plt.savefig(os.path.join(result_dir, f"empirical_power_{exp}.png"))
+        plt.close()
 
-    print(power_df)
-    print(f"FDR: {fdr:.4f}")
+        # Plot FDR for this experiment
+        plt.bar(["FDR"], [fdr])
+        plt.ylim(0, 1)
+        plt.ylabel("FDR")
+        plt.title(f"{exp} (alpha={alpha})")
+        plt.tight_layout()
+        plt.savefig(os.path.join(result_dir, f"fdr_{exp}.png"))
+        plt.close()
+
+        for _, row in power_df.iterrows():
+            summary_rows.append({
+                "experiment": exp,
+                "pathway": row["pathway"],
+                "empirical_power": row["empirical_power"],
+                "FDR": fdr,
+            })
+
+        print(power_df)
+        print(f"{exp} FDR: {fdr:.4f}")
+
+    summary_df = pd.DataFrame(summary_rows)
+    summary_df.to_csv(os.path.join(result_dir, "power_fdr_summary.csv"), index=False)
 
 
 def main():
