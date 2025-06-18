@@ -78,6 +78,11 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
             .mean()
             .reset_index(name="empirical_power")
         )
+        combined_power = power_df["empirical_power"].mean()
+        power_df = pd.concat(
+            [power_df, pd.DataFrame({"pathway": ["combined"], "empirical_power": [combined_power]})],
+            ignore_index=True,
+        )
 
         total_rejects = int(df_all["reject"].sum())
         false_rejects = df_all[~df_all["pathway"].isin(true_groups) & df_all["reject"]]
@@ -123,18 +128,21 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
         params = [v[0] for v in vals]
         labels = [f"{info['label']} = {v}" for v in params]
         power_traces = {g: [] for g in true_groups}
+        power_traces["combined"] = []
         fdr_list = []
         for val, p_df, fdr in vals:
             for g in true_groups:
                 row = p_df.loc[p_df.pathway == g, "empirical_power"]
                 power_traces[g].append(row.iloc[0] if not row.empty else 0)
-            fdr_list.append(fdr)
+            comb_row = p_df.loc[p_df.pathway == "combined", "empirical_power"]
+            power_traces["combined"].append(comb_row.iloc[0] if not comb_row.empty else 0)
+        fdr_list.append(fdr)
 
         x = np.arange(len(params))
-        width = 0.8 / len(true_groups)
+        width = 0.8 / len(power_traces)
         fig, ax = plt.subplots()
         for i, (g, pvals) in enumerate(power_traces.items()):
-            offset = (i - (len(true_groups) - 1) / 2) * width
+            offset = (i - (len(power_traces) - 1) / 2) * width
             ax.bar(x + offset, pvals, width, label=g)
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=45, ha="right")
