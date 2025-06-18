@@ -146,9 +146,19 @@ pip install numpy pandas scikit-learn scipy torch notebook
 Generate all simulations  
 jupyter nbconvert --execute DeepHisCoM_simulation.ipynb
 
-Run DeepHisCoM on one scenario  
+Run DeepHisCoM on one scenario
 jupyter nbconvert --execute DeepHisCoM_simulation.ipynb \
  --argv="--dir . --scenario simulation/linear_beta_0.1.csv --perm 1000"
+
+### Empirical Power & FDR
+
+After computing permutation p-values with `compute_pvalues.py`, you can
+summarize empirical power and the false discovery rate:
+
+```bash
+python analyze_power_fdr.py
+# The script will prompt for the result directory (e.g. `exp`)
+```
 
 ---
 
