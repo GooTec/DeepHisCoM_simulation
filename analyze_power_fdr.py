@@ -84,6 +84,7 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
         )
         combined_power = power_df["empirical_power"].mean()
         combined_df = pd.DataFrame({"pathway": ["combined"], "empirical_power": [combined_power]})
+        power_df = pd.concat([power_df, combined_df], ignore_index=True)
 
         total_rejects = int(df_all["reject"].sum())
         false_rejects = df_all[~df_all["pathway"].isin(true_groups) & df_all["reject"]]
@@ -129,12 +130,6 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
                 "empirical_power": row["empirical_power"],
                 "FDR": fdr_value,
             })
-        summary_rows.append({
-            "experiment": exp,
-            "pathway": "combined",
-            "empirical_power": combined_power,
-            "FDR": fdr_value,
-        })
 
         print(power_df)
         print(f"{exp} FDR: {fdr_value:.4f}")
