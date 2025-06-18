@@ -1,7 +1,16 @@
 import os
+import re
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+
+
+def _parse_condition(name: str) -> tuple[str, str, float]:
+    """Return scenario, parameter label, and numeric value from a condition name."""
+    m = re.search(r"^(linear|interaction|quadratic)_(beta|w)_([0-9.]+)", name)
+    if m:
+        return m.group(1), m.group(2), float(m.group(3))
+    return name, "param", float("nan")
 
 
 def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
@@ -43,6 +52,7 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
         return
 
     summary_rows = []
+    scenario_data: dict[str, dict] = {}
 
     for exp, tables in sorted(pval_by_exp.items()):
         df_all = pd.concat(tables, ignore_index=True)
@@ -58,6 +68,10 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
         total_rejects = int(df_all["reject"].sum())
         false_rejects = df_all[~df_all["pathway"].isin(true_groups) & df_all["reject"]]
         fdr = len(false_rejects) / total_rejects if total_rejects else 0.0
+
+        scen, label, val = _parse_condition(exp)
+        info = scenario_data.setdefault(scen, {"label": label, "vals": []})
+        info["vals"].append((val, power_df, fdr))
 
         # Plot empirical power for this experiment
         ax = power_df.plot(kind="bar", x="pathway", y="empirical_power", legend=False)
@@ -88,6 +102,39 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
 
         print(power_df)
         print(f"{exp} FDR: {fdr:.4f}")
+
+    # Generate trend plots grouped by scenario
+    for scen, info in scenario_data.items():
+        vals = sorted(info["vals"], key=lambda x: x[0])
+        params = [v[0] for v in vals]
+        power_traces = {g: [] for g in true_groups}
+        fdr_list = []
+        for val, p_df, fdr in vals:
+            for g in true_groups:
+                row = p_df.loc[p_df.pathway == g, "empirical_power"]
+                power_traces[g].append(row.iloc[0] if not row.empty else 0)
+            fdr_list.append(fdr)
+
+        fig, ax = plt.subplots()
+        for g, pvals in power_traces.items():
+            ax.plot(params, pvals, marker="o", label=g)
+        ax.set_xlabel(info["label"])
+        ax.set_ylabel("Empirical Power")
+        ax.set_title(f"{scen} (alpha={alpha})")
+        ax.set_ylim(0, 1)
+        ax.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(result_dir, f"trend_power_{scen}.png"))
+        plt.close()
+
+        plt.plot(params, fdr_list, marker="o")
+        plt.xlabel(info["label"])
+        plt.ylabel("FDR")
+        plt.title(f"{scen} (alpha={alpha})")
+        plt.ylim(0, 1)
+        plt.tight_layout()
+        plt.savefig(os.path.join(result_dir, f"trend_fdr_{scen}.png"))
+        plt.close()
 
     summary_df = pd.DataFrame(summary_rows)
     summary_df.to_csv(os.path.join(result_dir, "power_fdr_summary.csv"), index=False)

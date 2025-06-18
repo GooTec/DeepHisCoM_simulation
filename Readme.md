@@ -162,8 +162,12 @@ python analyze_power_fdr.py
 ```
 The script collects all `pvalue.csv` files under
 `<dir>/<simulation_number>/<condition>/` and generates per-condition plots
-(`empirical_power_<condition>.png`, `fdr_<condition>.png`) along with a
-`power_fdr_summary.csv` table in the provided directory.
+(`empirical_power_<condition>.png`, `fdr_<condition>.png`). It also
+aggregates results by scenario (`linear`, `interaction`, `quadratic`) and
+creates trend plots showing how power and FDR vary with the `w` or `beta`
+parameter. These are saved as `trend_power_<scenario>.png` and
+`trend_fdr_<scenario>.png`. A combined `power_fdr_summary.csv` table is
+written to the provided directory.
 
 ---
 
