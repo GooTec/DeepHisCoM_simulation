@@ -101,11 +101,13 @@ Each CSV contains
 --learning_rate …  
 --activation tanh | relu | leakyrelu | identity  
 --loss BCELoss | MSELoss  
---reg_type l1 | l2  
---reg_const_pathway_disease  
---reg_const_bio_pathway  
---stop_type Early-stopping rule  
---divide_rate Train/test split ratio  
+--reg_type l1 | l2
+--reg_const_pathway_disease
+--reg_const_bio_pathway
+--weight_init xavier | constant
+--pathway_l2norm Flag to apply L2-normalization after BatchNorm
+--stop_type Early-stopping rule
+--divide_rate Train/test split ratio
 --count_lim Patience for stopping
 
 ### Running Permutations

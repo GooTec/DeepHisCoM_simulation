@@ -47,11 +47,17 @@ class CustomDataset(Dataset):
 
 act_fn_by_name = {"tanh": nn.Tanh, "relu": nn.ReLU, "identity": nn.Identity, "leakyrelu": nn.LeakyReLU}
 
-def init_weights(m: nn.Module) -> None:
-    if isinstance(m, nn.Linear): nn.init.xavier_uniform_(m.weight)
+def constant_init(m: nn.Module) -> None:
+    if isinstance(m, nn.Linear):
+        m.weight.data.fill_(0.01)
+
+def xavier_init(m: nn.Module) -> None:
+    if isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight)
+
 
 class PathwayBlock(nn.Module):
-    def __init__(self, input_dim, hidden_dim, layer_num, act_fn, dropout):
+    def __init__(self, input_dim, hidden_dim, layer_num, act_fn, dropout, init_fn):
         super().__init__()
         layers = []
         if hidden_dim == 0:
@@ -62,16 +68,17 @@ class PathwayBlock(nn.Module):
                 layers += [nn.Linear(hidden_dim, hidden_dim, bias=False), act_fn, dropout]
             layers += [nn.Linear(hidden_dim, 1, bias=False), act_fn, dropout]
         self.block = nn.Sequential(*layers)
-        self.block.apply(init_weights)
+        self.block.apply(init_fn)
     def forward(self, x): return self.block(x)
 
 class DeepHisCoM(nn.Module):
-    def __init__(self, nvar, width, layer, covariate, act_fn, dropout_rate):
+    def __init__(self, nvar, width, layer, covariate, act_fn, dropout_rate, init_fn, use_l2norm=False):
         super().__init__()
         self.nvar = nvar; self.covariate = covariate
+        self.use_l2norm = use_l2norm
         dropout = nn.Dropout(dropout_rate)
         self.pathway_nn = nn.ModuleList([
-            PathwayBlock(nvar[i], width[i], layer[i], act_fn, dropout)
+            PathwayBlock(nvar[i], width[i], layer[i], act_fn, dropout, init_fn)
             for i in range(len(nvar))
         ])
         self.bn_path = nn.BatchNorm1d(len(nvar))
@@ -85,6 +92,8 @@ class DeepHisCoM(nn.Module):
         path = [self.pathway_nn[i](x[:, splits[i]:splits[i+1]]) for i in range(len(self.nvar))]
         pathway_layer = torch.cat(path, dim=1)
         pathway_layer = self.bn_path(pathway_layer)
+        if self.use_l2norm:
+            pathway_layer = pathway_layer / pathway_layer.norm(p=2)
         x_cat = torch.cat([pathway_layer, x[:, splits[-2]:splits[-1]]], dim=1)
         x_cat = self.dropout(x_cat)
         return torch.sigmoid(self.fc_path_disease(x_cat))
@@ -93,8 +102,8 @@ class DeepHisCoM(nn.Module):
 # Training per permutation with early stopping
 # ---------------------------------------------------------------------------
 
-def train_once(train_loader, val_loader, lr, bs, args, device, nvar, width, layer, cov_num, act_fn):
-    model = DeepHisCoM(nvar, width, layer, cov_num, act_fn, args.dropout_rate).to(device)
+def train_once(train_loader, val_loader, lr, bs, args, device, nvar, width, layer, cov_num, act_fn, init_fn):
+    model = DeepHisCoM(nvar, width, layer, cov_num, act_fn, args.dropout_rate, init_fn, args.pathway_l2norm).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.BCELoss() if args.loss.lower() == "bceloss" else nn.MSELoss()
 
@@ -105,6 +114,18 @@ def train_once(train_loader, val_loader, lr, bs, args, device, nvar, width, laye
             x, y = x_batch.to(device), y_batch.to(device)
             optimizer.zero_grad(); output = model(x).squeeze()
             loss = criterion(output, y.squeeze())
+            if args.reg_const_pathway_disease != 0:
+                for p in model.fc_path_disease.parameters():
+                    if args.reg_type == "l1":
+                        loss = loss + args.reg_const_pathway_disease * torch.norm(p, 1)
+                    else:
+                        loss = loss + args.reg_const_pathway_disease * torch.norm(p, 2) ** 2
+            if args.reg_const_bio_pathway != 0:
+                for p in model.pathway_nn.parameters():
+                    if args.reg_type == "l1":
+                        loss = loss + args.reg_const_bio_pathway * torch.norm(p, 1)
+                    else:
+                        loss = loss + args.reg_const_bio_pathway * torch.norm(p, 2) ** 2
             loss.backward(); optimizer.step(); losses.append(loss.item())
         model.eval(); preds, labels = [], []
         with torch.no_grad():
@@ -141,10 +162,13 @@ def main():
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--activation", type=str, default="leakyrelu")
     parser.add_argument("--loss", type=str, default="BCELoss")
+    parser.add_argument("--reg_type", type=str, default="l1", choices=["l1", "l2"])
     parser.add_argument("--reg_const_pathway_disease", type=float, default=0)
     parser.add_argument("--reg_const_bio_pathway", type=float, default=0)
     parser.add_argument("--leakyrelu_const", type=float, default=0.2)
     parser.add_argument("--dropout_rate", type=float, default=0.5)
+    parser.add_argument("--weight_init", type=str, default="xavier", choices=["xavier", "constant"])
+    parser.add_argument("--pathway_l2norm", action="store_true")
     parser.add_argument("--experiment_name", type=str, default="exp")
     parser.add_argument("--mapping_file", type=str, default="metabolite_mapping_intersection.set")
     parser.add_argument("--scenario", type=str)
@@ -154,6 +178,7 @@ def main():
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
     act_cls = act_fn_by_name[args.activation]
     act_fn = act_cls(args.leakyrelu_const) if args.activation == "leakyrelu" else act_cls()
+    init_fn = xavier_init if args.weight_init == "xavier" else constant_init
 
     os.chdir(args.dir); os.makedirs(args.experiment_name, exist_ok=True)
 
@@ -244,7 +269,7 @@ def main():
                     range(len(ds0)), ds0.y_data, stratify=ds0.y_data, test_size=0.2)
                 tl = DataLoader(Subset(ds0, idx_t), batch_size=bs, shuffle=True)
                 vl = DataLoader(Subset(ds0, idx_v), batch_size=bs)
-                _, val_auc = train_once(tl, vl, lr, bs, args, device, nvar, width, layer, cov_num, act_fn)
+                _, val_auc = train_once(tl, vl, lr, bs, args, device, nvar, width, layer, cov_num, act_fn, init_fn)
                 if val_auc > best_val_search:
                     best_val_search = val_auc; best_lr = lr; best_bs = bs
         print(f"Best hyperparams for sim {sim_num}, exp {exp}: lr={best_lr}, bs={best_bs}, AUC={best_val_search:.4f}")
@@ -266,7 +291,7 @@ def main():
                 range(len(ds)), ds.y_data, stratify=ds.y_data, test_size=0.2)
             tl = DataLoader(Subset(ds, idx_t), batch_size=best_bs, shuffle=True)
             vl = DataLoader(Subset(ds, idx_v), batch_size=best_bs)
-            param, auc = train_once(tl, vl, best_lr, best_bs, args, device, nvar, width, layer, cov_num, act_fn)
+            param, auc = train_once(tl, vl, best_lr, best_bs, args, device, nvar, width, layer, cov_num, act_fn, init_fn)
             outd = os.path.join(args.experiment_name, sim_num, exp, str(perm))
             os.makedirs(outd, exist_ok=True)
             np.savetxt(os.path.join(outd, "param.txt"), param)
