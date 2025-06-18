@@ -135,3 +135,4 @@ ipython\_config.py
 *.csv
 param.txt
 *.set
+exp*/*
