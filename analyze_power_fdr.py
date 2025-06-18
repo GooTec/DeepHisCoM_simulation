@@ -41,8 +41,12 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
         Significance threshold for declaring discoveries after
         Benjamini-Hochberg FDR correction.
 
-    Saves per-experiment ``empirical_power_<cond>.png`` and ``fdr_<cond>.png``
-    in ``result_dir`` and prints a summary table.
+    Saves per-experiment ``empirical_power_<cond>_a<alpha>.png`` for individual
+    pathways, ``combined_power_<cond>_a<alpha>.png`` for the mean power across
+    pathways, and ``fdr_<cond>_a<alpha>.png``. Trend plots per scenario include
+    ``trend_power_<scen>_a<alpha>.png`` for each pathway, ``trend_power_combined
+    _<scen>_a<alpha>.png`` for combined power, and ``trend_fdr_<scen>_a<alpha>.p
+    ng`` for FDR. A summary CSV is also saved.
     """
     if true_groups is None:
         true_groups = ["map00400", "map00860"]
@@ -79,10 +83,7 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
             .reset_index(name="empirical_power")
         )
         combined_power = power_df["empirical_power"].mean()
-        power_df = pd.concat(
-            [power_df, pd.DataFrame({"pathway": ["combined"], "empirical_power": [combined_power]})],
-            ignore_index=True,
-        )
+        combined_df = pd.DataFrame({"pathway": ["combined"], "empirical_power": [combined_power]})
 
         total_rejects = int(df_all["reject"].sum())
         false_rejects = df_all[~df_all["pathway"].isin(true_groups) & df_all["reject"]]
@@ -102,6 +103,16 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
         plt.savefig(os.path.join(result_dir, f"empirical_power_{exp}_a{alpha}.png"))
         plt.close()
 
+        # Plot combined power separately
+        ax = combined_df.plot(kind="bar", x="pathway", y="empirical_power", legend=False)
+        ax.set_xlabel("Pathway")
+        ax.set_ylabel("Empirical Power")
+        ax.set_ylim(0, 1)
+        ax.set_title(f"{exp} combined (alpha={alpha})")
+        plt.tight_layout()
+        plt.savefig(os.path.join(result_dir, f"combined_power_{exp}_a{alpha}.png"))
+        plt.close()
+
         # Plot FDR for this experiment
         plt.bar(["FDR"], [fdr_value])
         plt.ylim(0, 1)
@@ -118,6 +129,12 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
                 "empirical_power": row["empirical_power"],
                 "FDR": fdr_value,
             })
+        summary_rows.append({
+            "experiment": exp,
+            "pathway": "combined",
+            "empirical_power": combined_power,
+            "FDR": fdr_value,
+        })
 
         print(power_df)
         print(f"{exp} FDR: {fdr_value:.4f}")
@@ -128,15 +145,15 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
         params = [v[0] for v in vals]
         labels = [f"{info['label']} = {v}" for v in params]
         power_traces = {g: [] for g in true_groups}
-        power_traces["combined"] = []
+        combined_vals = []
         fdr_list = []
-        for val, p_df, fdr in vals:
+        for val, p_df, fdr_val in vals:
             for g in true_groups:
                 row = p_df.loc[p_df.pathway == g, "empirical_power"]
                 power_traces[g].append(row.iloc[0] if not row.empty else 0)
             comb_row = p_df.loc[p_df.pathway == "combined", "empirical_power"]
-            power_traces["combined"].append(comb_row.iloc[0] if not comb_row.empty else 0)
-        fdr_list.append(fdr)
+            combined_vals.append(comb_row.iloc[0] if not comb_row.empty else 0)
+            fdr_list.append(fdr_val)
 
         x = np.arange(len(params))
         width = 0.8 / len(power_traces)
@@ -152,6 +169,18 @@ def compute_metrics(result_dir: str, true_groups=None, alpha: float = 0.05):
         ax.legend()
         plt.tight_layout()
         plt.savefig(os.path.join(result_dir, f"trend_power_{scen}_a{alpha}.png"))
+        plt.close()
+
+        # Plot combined power trend separately
+        fig, ax = plt.subplots()
+        ax.bar(x, combined_vals, width=0.6, label="combined")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=45, ha="right")
+        ax.set_ylabel("Empirical Power")
+        ax.set_title(f"{scen} combined (alpha={alpha})")
+        ax.set_ylim(0, 1)
+        plt.tight_layout()
+        plt.savefig(os.path.join(result_dir, f"trend_power_combined_{scen}_a{alpha}.png"))
         plt.close()
 
         fig, ax = plt.subplots()
